@@ -1,3 +1,5 @@
+#!/bin/bash
+
 python run_qa.py \
     --model_name_or_path klue/roberta-small \
     --do_train \
