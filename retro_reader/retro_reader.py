@@ -40,12 +40,10 @@ class SketchReader(Trainer):
         eval_dataset: Dataset,
         mode="eval",
     ):
-        print(output)
         if isinstance(output, EvalLoopOutput):
             logits = output.predictions
         else:
             logits = output
-
         example_id_to_index = {k: i for i, k in enumerate(eval_examples["guid"])}
         features_per_example = collections.defaultdict(list)
         for i, feature in enumerate(eval_dataset):
@@ -68,13 +66,56 @@ class SketchReader(Trainer):
         final_map = dict(zip(eval_examples["guid"], score_ext.tolist()))
         with open(os.path.join(self.args.output_dir, "cls_score.json"), "w") as writer:
             writer.write(json.dumps(final_map, indent=4) + "\n")
-        if mode == "eval":
+        if mode == "evaluate":
             return EvalPrediction(
                 predictions=logits,
                 label_ids=output.label_ids,
             )
         else:
             return final_map
+
+    # def post_process_function(
+    #     self,
+    #     output: Union[np.ndarray, EvalLoopOutput],
+    #     eval_examples: Dataset,
+    #     eval_dataset: Dataset,
+    #     mode="eval",
+    # ):
+    #     if isinstance(output, EvalLoopOutput):
+    #         logits = output.predictions
+    #     else:
+    #         logits = output
+    #     print(logits)
+
+    #     example_id_to_index = {k: i for i, k in enumerate(eval_examples["guid"])}
+    #     features_per_example = collections.defaultdict(list)
+    #     for i, feature in enumerate(eval_dataset):
+    #         features_per_example[example_id_to_index[feature["example_id"]]].append(i)
+
+    #     count_map = {k: len(v) for k, v in features_per_example.items()}
+
+    #     logits_ans = np.zeros(len(count_map))
+    #     logits_na = np.zeros(len(count_map))
+    #     for example_index, example in enumerate(tqdm(eval_examples)):
+    #         feature_indices = features_per_example[example_index]
+    #         n_strides = count_map[example_index]
+    #         logits_ans[example_index] += logits[example_index, 0] / n_strides
+    #         logits_na[example_index] += logits[example_index, 1] / n_strides
+
+    #     # Calculate E-FV score
+    #     score_ext = logits_ans - logits_na
+
+    #     # Save external front verification score
+    #     final_map = dict(zip(eval_examples["guid"], score_ext.tolist()))
+    #     with open(os.path.join(self.args.output_dir, "cls_score.json"), "w") as writer:
+    #         writer.write(json.dumps(final_map, indent=4) + "\n")
+    #     if mode == "eval":
+    #         return EvalPrediction(
+    #             predictions=logits,
+    #             label_ids=output.label_ids,
+    #         )
+    #     else:
+    #         return final_map
 
     def evaluate(
         self,
@@ -99,7 +140,7 @@ class SketchReader(Trainer):
                 description="Evaluation",
                 # No point gathering the predictions if there are no metrics, otherwise we defer to
                 # self.args.prediction_loss_only
-                prediction_loss_only=True if self.compute_metrics is None else None,
+                # prediction_loss_only=True if self.compute_metrics is None else None,
                 ignore_keys=ignore_keys,
                 # metric_key_prefix=metric_key_prefix,
             )
@@ -107,14 +148,14 @@ class SketchReader(Trainer):
             self.compute_metrics = compute_metrics
 
         if self.post_process_function is not None and self.compute_metrics is not None:
+            # print("--------------")
+            # print(output)
+            # print("--------------")
+            metrics = self.compute_metrics(output)
+
             eval_preds = self.post_process_function(
-                # eval_examples=eval_examples, eval_dataset=eval_dataset, output=output.predictions
-                eval_examples=eval_examples,
-                eval_dataset=eval_dataset,
-                output=output,
+                eval_examples=eval_examples, eval_dataset=eval_dataset, output=output
             )
-            # eval_preds = self.post_process_function(eval_examples, eval_dataset, output)
-            metrics = self.compute_metrics(eval_preds)
 
             # Prefix all keys with metric_key_prefix + '_'
             for key in list(metrics.keys()):
@@ -125,14 +166,14 @@ class SketchReader(Trainer):
             metrics = {}
 
         total_batch_size = self.args.eval_batch_size * self.args.world_size
-        metrics.update(
-            speed_metrics(
-                metric_key_prefix,
-                start_time,
-                num_samples=output.num_samples,
-                num_steps=math.ceil(output.num_samples / total_batch_size),
-            )
-        )
+        # metrics.update(
+        #     speed_metrics(
+        #         metric_key_prefix,
+        #         start_time,
+        #         num_samples=output.num_samples,
+        #         num_steps=math.ceil(output.num_samples / total_batch_size),
+        #     )
+        # )
         self.log(metrics)
 
         self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, metrics)
@@ -465,14 +506,14 @@ class IntensiveReader(Trainer):
                     metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
 
             total_batch_size = self.args.eval_batch_size * self.args.world_size
-            metrics.update(
-                speed_metrics(
-                    metric_key_prefix,
-                    start_time,
-                    num_samples=output.num_samples,
-                    num_steps=math.ceil(output.num_samples / total_batch_size),
-                )
-            )
+            # metrics.update(
+            #     speed_metrics(
+            #         metric_key_prefix,
+            #         start_time,
+            #         num_samples=output.num_samples,
+            #         num_steps=math.ceil(output.num_samples / total_batch_size),
+            #     )
+            # )
             self.log(metrics)
 
         # Log and save evaluation results
@@ -644,7 +685,7 @@ class RetroReader:
         sketch_reader_result = self.sketch_reader.train()
         # self.save_and_log(self.sketch_reader, sketch_reader_result, module_name="sketch")
         intensive_reader_result = self.intensive_reader.train()
-        # self.save_and_log(self.intensive_reader, intensive_reader_result, module_name='intensive')
+        # self.save_and_log(self.intensive_reader, intensive_reader_result, module_name="intensive")
 
     def preprocess_examples(self, module_name="sketch"):
         with self.training_args.main_process_first(
@@ -694,7 +735,7 @@ class RetroReader:
                 f1 = f1_score(labels, preds)
                 acc = accuracy_score(labels, preds)
 
-                return {"micro f1 score": f1, "accuracy": acc}
+                return {"micro f1 score": f1, "accuracy": acc, "loss": p.metrics["eval_loss"]}
 
             self.sketch_reader = SketchReader(
                 model=sketch_reader_model,
@@ -751,10 +792,6 @@ class RetroReader:
         reader.save_metrics("train", metrics)
         reader.save_state()
 
-        print(self.eval_dataset_for_sketch_reader)
-        print(self.eval_dataset_for_sketch_reader["labels"])
-        print(self.eval_examples)
-        print(self.eval_examples["labels"])
         metrics = reader.evaluate(
             eval_dataset=self.eval_dataset_for_sketch_reader
             if module_name == "sketch"
