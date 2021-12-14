@@ -317,19 +317,25 @@ class IntensiveReader(Trainer):
                 all_predictions[example["guid"]] = predictions[0]["text"]
             else:
                 # Otherwise we first need to find the best non-empty prediction.
-                # print(i, len(predictions), type(predictions), predictions)
+                # print(i, len(predictions), type(predictions), predictions, predictions[0])
                 i = 0
-                while predictions[i]["text"] == "":
+                while i < len(predictions) and predictions[i]["text"] == "":  # i == 2, len(predictions)=2
                     i += 1
-                best_non_null_pred = predictions[i]
 
-                # Then we compare to the null prediction using the threshold.
-                score_diff = null_score - best_non_null_pred["start_logit"] - best_non_null_pred["end_logit"]
-                scores_diff_json[example["guid"]] = float(score_diff)  # To be JSON-serializable.
-                if score_diff > null_score_diff_threshold:
-                    all_predictions[example["guid"]] = ""
+                if i != len(predictions):
+                    best_non_null_pred = predictions[i]
+
+                    # Then we compare to the null prediction using the threshold.
+                    score_diff = (
+                        null_score - best_non_null_pred["start_logit"] - best_non_null_pred["end_logit"]
+                    )
+                    scores_diff_json[example["guid"]] = float(score_diff)  # To be JSON-serializable.
+                    if score_diff > null_score_diff_threshold:
+                        all_predictions[example["guid"]] = ""
+                    else:
+                        all_predictions[example["guid"]] = best_non_null_pred["text"]
                 else:
-                    all_predictions[example["guid"]] = best_non_null_pred["text"]
+                    all_predictions[example["guid"]] = ""
 
             # Make `predictions` JSON-serializable by casting np.float back to float.
             all_nbest_json[example["guid"]] = [
@@ -620,9 +626,10 @@ class RetroReader:
         return predictions, scores
 
     def train(self):
-        # sketch_reader_result = self.sketch_reader.evaluate()
+        sketch_reader_result = self.sketch_reader.evaluate()
         intensive_reader_result = self.intensive_reader.evaluate()
 
+        # ------------------------------------------------------
         # sketch_reader_result = self.sketch_reader.train()
         # self.save_and_log(self.sketch_reader, sketch_reader_result)
         # intensive_reader_result = self.intensive_reader.train()

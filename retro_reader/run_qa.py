@@ -21,7 +21,6 @@ from utils_qa import create_pandas, read_json
 from processor import DataProcessor
 from metric import compute_metrics
 from retro_reader import RetroReader
-from model import RobertaForQuestionAnswering, RobertaForSequenceClassification
 
 import wandb
 

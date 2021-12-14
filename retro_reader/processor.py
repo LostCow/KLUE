@@ -126,10 +126,12 @@ class DataProcessor:
         tokenized_examples["start_positions"] = []
         tokenized_examples["end_positions"] = []
         tokenized_examples["is_impossible"] = []
+        tokenized_examples["cls_index"] = []
 
         for i, offsets in enumerate(offset_mapping):
             input_ids = tokenized_examples["input_ids"][i]
             cls_index = input_ids.index(self.tokenizer.cls_token_id)
+            tokenized_examples["cls_index"].append(cls_index)
 
             sequence_ids = tokenized_examples.sequence_ids(i)
 
