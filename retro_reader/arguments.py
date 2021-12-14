@@ -42,6 +42,15 @@ class DataTrainingArguments:
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
 
+    load_best_model_at_end_sketch_reader: str = field(
+        default="eval_f1",
+        metadata={"help": "Load best model"},
+    )
+    load_best_model_at_end_intensive_reader: str = field(
+        default="eval_exact",
+        metadata={"help": "Load best model"},
+    )
+
     dataset_name: Optional[str] = field(
         default=None,
         metadata={"help": "The name of the dataset to use (via the datasets library)."},

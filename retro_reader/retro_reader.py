@@ -26,6 +26,7 @@ import os
 import json
 
 from sklearn.metrics import f1_score, accuracy_score
+from copy import copy
 
 
 class SketchReader(Trainer):
@@ -735,11 +736,15 @@ class RetroReader:
                 f1 = f1_score(labels, preds)
                 acc = accuracy_score(labels, preds)
 
-                return {"micro f1 score": f1, "accuracy": acc, "loss": p.metrics["eval_loss"]}
+                return {"f1": f1, "accuracy": acc, "loss": p.metrics["eval_loss"]}
 
+            # self.training_args.metric_for_best_model = self.data_args.load_best_model_at_end_sketch_reader
+            # self.training_args.load_best_model_at_end = True
+            sketch_reader_args = copy(self.training_args)
+            sketch_reader_args.metric_for_best_model = "eval_f1"
             self.sketch_reader = SketchReader(
                 model=sketch_reader_model,
-                args=self.training_args,
+                args=sketch_reader_args,
                 train_dataset=self.train_dataset_for_sketch_reader if self.training_args.do_train else None,
                 eval_dataset=self.eval_dataset_for_sketch_reader if self.training_args.do_eval else None,
                 eval_examples=self.eval_examples if self.training_args.do_eval else None,
@@ -763,9 +768,13 @@ class RetroReader:
                 metric = load_metric("squad_v2")
                 return metric.compute(predictions=p.predictions, references=p.label_ids)
 
+            # self.training_args.metric_for_best_model = self.data_args.load_best_model_at_end_intensive_reader
+            # self.training_args.metric_for_best_model = "eval_exact"
+            intensive_reader_args = copy(self.training_args)
+            intensive_reader_args.metric_for_best_model = "eval_exact"
             self.intensive_reader = IntensiveReader(
                 model=intensive_reader_model,
-                args=self.training_args,
+                args=intensive_reader_args,
                 data_args=self.data_args,
                 train_dataset=self.train_dataset_for_intensive_reader
                 if self.training_args.do_train
