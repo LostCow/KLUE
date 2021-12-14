@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 
 from torch import nn
 import numpy as np
+from torch.nn.modules import module
 
 from transformers import Trainer, AutoConfig
 from transformers.trainer_utils import (
@@ -24,6 +25,8 @@ from tqdm import tqdm
 import os
 import json
 
+from sklearn.metrics import f1_score, accuracy_score
+
 
 class SketchReader(Trainer):
     def __init__(self, *args, eval_examples=None, **kwargs):
@@ -37,10 +40,12 @@ class SketchReader(Trainer):
         eval_dataset: Dataset,
         mode="eval",
     ):
+        print(output)
         if isinstance(output, EvalLoopOutput):
             logits = output.predictions
         else:
             logits = output
+
         example_id_to_index = {k: i for i, k in enumerate(eval_examples["guid"])}
         features_per_example = collections.defaultdict(list)
         for i, feature in enumerate(eval_dataset):
@@ -102,7 +107,12 @@ class SketchReader(Trainer):
             self.compute_metrics = compute_metrics
 
         if self.post_process_function is not None and self.compute_metrics is not None:
-            eval_preds = self.post_process_function(eval_examples, eval_dataset, output.predictions)
+            eval_preds = self.post_process_function(
+                # eval_examples=eval_examples, eval_dataset=eval_dataset, output=output.predictions
+                eval_examples=eval_examples,
+                eval_dataset=eval_dataset,
+                output=output,
+            )
             # eval_preds = self.post_process_function(eval_examples, eval_dataset, output)
             metrics = self.compute_metrics(eval_preds)
 
@@ -335,6 +345,7 @@ class IntensiveReader(Trainer):
                     else:
                         all_predictions[example["guid"]] = best_non_null_pred["text"]
                 else:
+                    scores_diff_json[example["guid"]] = float(null_score)
                     all_predictions[example["guid"]] = ""
 
             # Make `predictions` JSON-serializable by casting np.float back to float.
@@ -466,7 +477,7 @@ class IntensiveReader(Trainer):
 
         # Log and save evaluation results
         filename = "eval_results.txt"
-        eval_result_file = self.name + "_" + filename if self.name else filename
+        eval_result_file = "intensive_reader_" + filename
         with open(os.path.join(self.args.output_dir, eval_result_file), "a") as writer:
             for key in sorted(metrics.keys()):
                 writer.write("%s = %s\n" % (key, str(metrics[key])))
@@ -626,14 +637,14 @@ class RetroReader:
         return predictions, scores
 
     def train(self):
-        sketch_reader_result = self.sketch_reader.evaluate()
-        intensive_reader_result = self.intensive_reader.evaluate()
+        # sketch_reader_result = self.sketch_reader.evaluate()
+        # intensive_reader_result = self.intensive_reader.evaluate()
 
         # ------------------------------------------------------
-        # sketch_reader_result = self.sketch_reader.train()
-        # self.save_and_log(self.sketch_reader, sketch_reader_result)
-        # intensive_reader_result = self.intensive_reader.train()
-        # self.save_and_log(self.intensive_reader, intensive_reader_result)
+        sketch_reader_result = self.sketch_reader.train()
+        # self.save_and_log(self.sketch_reader, sketch_reader_result, module_name="sketch")
+        intensive_reader_result = self.intensive_reader.train()
+        # self.save_and_log(self.intensive_reader, intensive_reader_result, module_name='intensive')
 
     def preprocess_examples(self, module_name="sketch"):
         with self.training_args.main_process_first(
@@ -671,18 +682,30 @@ class RetroReader:
             sketch_reader_model = RobertaForSequenceClassification.from_pretrained(
                 self.model_name_or_path, config=sketch_reader_config
             )
-            train_dataset, eval_dataset = self.preprocess_examples(module_name="sketch")
+            (
+                self.train_dataset_for_sketch_reader,
+                self.eval_dataset_for_sketch_reader,
+            ) = self.preprocess_examples(module_name="sketch")
+
+            def compute_metrics_for_sketch_reader(p: EvalPrediction):
+                labels = p.label_ids
+                preds = p.predictions.argmax(-1)
+
+                f1 = f1_score(labels, preds)
+                acc = accuracy_score(labels, preds)
+
+                return {"micro f1 score": f1, "accuracy": acc}
 
             self.sketch_reader = SketchReader(
                 model=sketch_reader_model,
                 args=self.training_args,
-                train_dataset=train_dataset if self.training_args.do_train else None,
-                eval_dataset=eval_dataset if self.training_args.do_eval else None,
+                train_dataset=self.train_dataset_for_sketch_reader if self.training_args.do_train else None,
+                eval_dataset=self.eval_dataset_for_sketch_reader if self.training_args.do_eval else None,
                 eval_examples=self.eval_examples if self.training_args.do_eval else None,
                 tokenizer=self.tokenizer,
                 data_collator=self.data_collator,
                 # post_process_function=self.mrc_processor.post_processing_function,
-                # compute_metrics=self.compute_metrics,
+                compute_metrics=compute_metrics_for_sketch_reader,
             )
 
         elif module_name == "intensive":
@@ -690,7 +713,10 @@ class RetroReader:
             intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
                 self.model_name_or_path, config=intensive_reader_config
             )
-            train_dataset, eval_dataset = self.preprocess_examples(module_name="intensive")
+            (
+                self.train_dataset_for_intensive_reader,
+                self.eval_dataset_for_intensive_reader,
+            ) = self.preprocess_examples(module_name="intensive")
 
             def compute_metrics(p: EvalPrediction):
                 metric = load_metric("squad_v2")
@@ -700,8 +726,10 @@ class RetroReader:
                 model=intensive_reader_model,
                 args=self.training_args,
                 data_args=self.data_args,
-                train_dataset=train_dataset if self.training_args.do_train else None,
-                eval_dataset=eval_dataset if self.training_args.do_eval else None,
+                train_dataset=self.train_dataset_for_intensive_reader
+                if self.training_args.do_train
+                else None,
+                eval_dataset=self.eval_dataset_for_intensive_reader if self.training_args.do_eval else None,
                 eval_examples=self.eval_examples if self.training_args.do_eval else None,
                 tokenizer=self.tokenizer,
                 data_collator=self.data_collator,
@@ -709,27 +737,37 @@ class RetroReader:
                 compute_metrics=compute_metrics,
             )
 
-    def save_and_log(self, reader, result):
+    def save_and_log(self, reader, result, module_name="sketch"):
         reader.save_model()
         metrics = result.metrics
         max_train_samples = (
             self.data_args.max_train_samples
             if self.data_args.max_train_samples is not None
-            else len(self.train_dataset)
+            else len(self.train_examples)
         )
-        metrics["train_samples"] = min(max_train_samples, len(self.train_dataset))
+        metrics["train_samples"] = min(max_train_samples, len(self.train_examples))
 
         reader.log_metrics("train", metrics)
         reader.save_metrics("train", metrics)
         reader.save_state()
 
-        metrics = reader.evaluate()
+        print(self.eval_dataset_for_sketch_reader)
+        print(self.eval_dataset_for_sketch_reader["labels"])
+        print(self.eval_examples)
+        print(self.eval_examples["labels"])
+        metrics = reader.evaluate(
+            eval_dataset=self.eval_dataset_for_sketch_reader
+            if module_name == "sketch"
+            else self.eval_dataset_for_intensive_reader,
+            eval_examples=self.eval_examples,
+        )
+        print(metrics)
         max_eval_samples = (
             self.data_args.max_eval_samples
             if self.data_args.max_eval_samples is not None
-            else len(self.eval_dataset)
+            else len(self.eval_examples)
         )
-        metrics["eval_samples"] = min(max_eval_samples, len(self.eval_dataset))
+        metrics["eval_samples"] = min(max_eval_samples, len(self.eval_examples))
 
         reader.log_metrics("eval", metrics)
         reader.save_metrics("eval", metrics)

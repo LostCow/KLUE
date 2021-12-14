@@ -126,12 +126,12 @@ class DataProcessor:
         tokenized_examples["start_positions"] = []
         tokenized_examples["end_positions"] = []
         tokenized_examples["is_impossible"] = []
-        tokenized_examples["cls_index"] = []
+        tokenized_examples["cls_idx"] = []
 
         for i, offsets in enumerate(offset_mapping):
             input_ids = tokenized_examples["input_ids"][i]
             cls_index = input_ids.index(self.tokenizer.cls_token_id)
-            tokenized_examples["cls_index"].append(cls_index)
+            tokenized_examples["cls_idx"].append(cls_index)
 
             sequence_ids = tokenized_examples.sequence_ids(i)
 
@@ -203,6 +203,8 @@ class DataProcessor:
         for i in range(len(tokenized_examples["input_ids"])):
             # Grab the sequence corresponding to that example (to know what is the context and what is the question).
             sequence_ids = tokenized_examples.sequence_ids(i)
+
+            input_ids = tokenized_examples["input_ids"][i]
             context_index = 1 if self.pad_on_right else 0
 
             # One example can give several spans, this is the index of the example containing this span of text.

@@ -179,7 +179,9 @@ class RobertaForQuestionAnsweringAVPool(RobertaPreTrainedModel):
         ) + outputs[2:]
 
         total_loss = None
-        if start_positions is not None and end_positions is not None:
+        # print(has_log)
+        # print(cls_idx)
+        if start_positions is not None and end_positions is not None and cls_idx is not None:
             # If we are on multi-GPU, split add a dimension
             if len(start_positions.size()) > 1:
                 start_positions = start_positions.squeeze(-1)
