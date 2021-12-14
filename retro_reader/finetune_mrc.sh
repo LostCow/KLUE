@@ -1,0 +1,23 @@
+python run_qa.py \
+    --model_name_or_path "klue/roberta-small" \
+    --do_train \
+    --do_eval \
+    --evaluation_strategy steps \
+    --logging_strategy steps \
+    --save_strategy steps \
+    --save_steps 100 \
+    --eval_steps 100 \
+    --dataset_name "klue" \
+    --dataset_path '../klue-mrc-v1.1' \
+    --train_file '/opt/ml/klue/klue-mrc-v1.1/klue-mrc-v1.1_train.json' \
+    --validation_file '/opt/ml/klue/klue-mrc-v1.1/klue-mrc-v1.1_dev.json' \
+    --save_total_limit 2 \
+    --output_dir outputs \
+    --version_2_with_negative True \
+    --num_train_epochs 1 \
+    --logging_steps 100 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 8 \
+    --metric_for_best_model "eval_exact" \
+    --load_best_model_at_end True
