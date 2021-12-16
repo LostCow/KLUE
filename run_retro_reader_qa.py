@@ -5,21 +5,13 @@ import datasets
 from datasets import Dataset
 import transformers
 from transformers import (
-    AutoConfig,
-    AutoModelForQuestionAnswering,
-    AutoTokenizer,
-    DataCollatorWithPadding,
     HfArgumentParser,
     TrainingArguments,
-    default_data_collator,
     set_seed,
 )
 
 from arguments import DataTrainingArguments, SketchModelArguments, IntensiveModelArguments
-from trainer_qa import QuestionAnsweringTrainer
-from utils_qa import create_pandas, read_json
-from processor import DataProcessor
-from metric import compute_metrics
+from utils import create_pandas, read_json
 from retro_reader import RetroReader
 
 import wandb

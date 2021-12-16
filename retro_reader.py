@@ -32,12 +32,10 @@ from model import (
 
 import collections
 import time
-import math
 from tqdm import tqdm
 import os
 import json
 
-from sklearn.metrics import f1_score, accuracy_score
 from copy import copy
 
 

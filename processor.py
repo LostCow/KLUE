@@ -1,7 +1,3 @@
-from transformers import EvalPrediction
-from utils_qa import postprocess_qa_predictions
-
-
 class DataProcessor:
     def __init__(
         self,
