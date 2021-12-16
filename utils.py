@@ -2,6 +2,18 @@ import json
 from typing import List
 import pandas as pd
 from collections import defaultdict
+from datasets import Dataset
+import os
+
+
+def convert_json_to_dataset(dataset_path="", train_file_name="", validation_file_name=""):
+    train_data_path = os.path.join(dataset_path, train_file_name)
+    valid_data_path = os.path.join(dataset_path, validation_file_name)
+    train_df = create_pandas(read_json(train_data_path))
+    valid_df = create_pandas(read_json(valid_data_path))
+    train_dataset = Dataset.from_pandas(train_df)
+    valid_dataset = Dataset.from_pandas(valid_df)
+    return train_dataset, valid_dataset
 
 
 def read_json(file_path):
