@@ -99,8 +99,8 @@ def load_model_and_type(model_dir: str):
         model_tar_path: str: the name of tar file
     """
 
-    sketch_tarpath = os.path.join(model_dir, "intensive.tar.gz")
-    intensive_tarpath = os.path.join(model_dir, "sketch.tar.gz")
+    sketch_tarpath = os.path.join(model_dir, "sketch.tar.gz")
+    intensive_tarpath = os.path.join(model_dir, "intensive.tar.gz")
 
     tar1 = tarfile.open(sketch_tarpath, "r:gz")
     tar2 = tarfile.open(intensive_tarpath, "r:gz")
@@ -114,7 +114,7 @@ def inference() -> None:
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    model_dir = os.environ.get("SM_CHANNEL_EVAL", "/data")
+    model_dir = "./model"
 
     load_model_and_type(model_dir=model_dir)
 
