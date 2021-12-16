@@ -1,5 +1,5 @@
 python run_qa.py \
-    --model_name_or_path "klue/roberta-large" \
+    --model_name_or_path "klue/bert-base" \
     --do_train \
     --do_eval \
     --evaluation_strategy epoch \

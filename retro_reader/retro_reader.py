@@ -16,7 +16,12 @@ from datasets.load import load_metric
 from datasets import Dataset
 
 from processor import DataProcessor
-from model import RobertaForSequenceClassification, RobertaForQuestionAnsweringAVPool
+from model import (
+    BertForSequenceClassification,
+    BertForQuestionAnsweringAVPool,
+    RobertaForSequenceClassification,
+    RobertaForQuestionAnsweringAVPool,
+)
 
 import collections
 import time

@@ -70,8 +70,8 @@ def main():
 
     train_data_path = os.path.join(data_args.dataset_path, data_args.train_file)
     valid_data_path = os.path.join(data_args.dataset_path, data_args.validation_file)
-    train_df = create_pandas(read_json(train_data_path))
-    valid_df = create_pandas(read_json(valid_data_path))
+    train_df = create_pandas(read_json(train_data_path)).iloc[:100]
+    valid_df = create_pandas(read_json(valid_data_path)).iloc[:100]
     train_dataset = Dataset.from_pandas(train_df)
     valid_dataset = Dataset.from_pandas(valid_df)
 
