@@ -1,20 +1,22 @@
 python run_qa.py \
-    --model_name_or_path "klue/roberta-small" \
+    --model_name_or_path "klue/roberta-large" \
     --do_train \
     --do_eval \
     --evaluation_strategy epoch \
     --logging_strategy epoch \
     --save_strategy epoch \
     --dataset_name "klue" \
-    --dataset_path '../klue-mrc-v1.1' \
-    --train_file '/opt/ml/klue/klue-mrc-v1.1/klue-mrc-v1.1_train.json' \
-    --validation_file '/opt/ml/klue/klue-mrc-v1.1/klue-mrc-v1.1_dev.json' \
+    --dataset_path '/opt/ml/KLUE/data' \
+    --train_file '/opt/ml/KLUE/data/klue-mrc-v1.1_train.json' \
+    --validation_file '/opt/ml/KLUE/data/klue-mrc-v1.1_dev.json' \
     --save_total_limit 2 \
     --output_dir outputs \
     --version_2_with_negative True \
-    --num_train_epochs 3 \
+    --num_train_epochs 5 \
     --logging_steps 100 \
     --per_device_train_batch_size 8 \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 8 \
-    --load_best_model_at_end True
+    --load_best_model_at_end True \
+    --fp16 True \
+    --report_to 'wandb'

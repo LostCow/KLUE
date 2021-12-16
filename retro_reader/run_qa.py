@@ -52,7 +52,9 @@ def setup_logging(training_args):
 def main():
     # wandb.init()
     # parser setting, we don't use argments to json
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments)
+    )
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     setup_logging(training_args)
@@ -60,14 +62,16 @@ def main():
 
     # config = AutoConfig.from_pretrained(model_args.model_name_or_path)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path, use_fast=True
+    )
 
     # model = AutoModelForQuestionAnswering.from_pretrained(model_args.model_name_or_path, config=config)
 
     train_data_path = os.path.join(data_args.dataset_path, data_args.train_file)
     valid_data_path = os.path.join(data_args.dataset_path, data_args.validation_file)
-    train_df = create_pandas(read_json(train_data_path)).iloc[:100]
-    valid_df = create_pandas(read_json(valid_data_path)).iloc[:100]
+    train_df = create_pandas(read_json(train_data_path))
+    valid_df = create_pandas(read_json(valid_data_path))
     train_dataset = Dataset.from_pandas(train_df)
     valid_dataset = Dataset.from_pandas(valid_df)
 
@@ -112,7 +116,9 @@ def main():
     data_collator = (
         default_data_collator
         if data_args.pad_to_max_length
-        else DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None)
+        else DataCollatorWithPadding(
+            tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None
+        )
     )
     trainer = RetroReader(
         # model=model,
@@ -166,5 +172,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.environ["WANDB_DISABLED"] = "true"
+    # os.environ["WANDB_DISABLED"] = "true"
     main()

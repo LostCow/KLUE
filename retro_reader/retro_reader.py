@@ -27,6 +27,8 @@ import json
 
 from sklearn.metrics import f1_score, accuracy_score
 from copy import copy
+import torch
+import gc
 
 
 class SketchReader(Trainer):
@@ -75,49 +77,6 @@ class SketchReader(Trainer):
         else:
             return final_map
 
-    # def post_process_function(
-    #     self,
-    #     output: Union[np.ndarray, EvalLoopOutput],
-    #     eval_examples: Dataset,
-    #     eval_dataset: Dataset,
-    #     mode="eval",
-    # ):
-    #     if isinstance(output, EvalLoopOutput):
-    #         logits = output.predictions
-    #     else:
-    #         logits = output
-    #     print(logits)
-
-    #     example_id_to_index = {k: i for i, k in enumerate(eval_examples["guid"])}
-    #     features_per_example = collections.defaultdict(list)
-    #     for i, feature in enumerate(eval_dataset):
-    #         features_per_example[example_id_to_index[feature["example_id"]]].append(i)
-
-    #     count_map = {k: len(v) for k, v in features_per_example.items()}
-
-    #     logits_ans = np.zeros(len(count_map))
-    #     logits_na = np.zeros(len(count_map))
-    #     for example_index, example in enumerate(tqdm(eval_examples)):
-    #         feature_indices = features_per_example[example_index]
-    #         n_strides = count_map[example_index]
-    #         logits_ans[example_index] += logits[example_index, 0] / n_strides
-    #         logits_na[example_index] += logits[example_index, 1] / n_strides
-
-    #     # Calculate E-FV score
-    #     score_ext = logits_ans - logits_na
-
-    #     # Save external front verification score
-    #     final_map = dict(zip(eval_examples["guid"], score_ext.tolist()))
-    #     with open(os.path.join(self.args.output_dir, "cls_score.json"), "w") as writer:
-    #         writer.write(json.dumps(final_map, indent=4) + "\n")
-    #     if mode == "eval":
-    #         return EvalPrediction(
-    #             predictions=logits,
-    #             label_ids=output.label_ids,
-    #         )
-    #     else:
-    #         return final_map
-
     def evaluate(
         self,
         eval_dataset: Optional[Dataset] = None,
@@ -134,7 +93,11 @@ class SketchReader(Trainer):
 
         compute_metrics = self.compute_metrics
         self.compute_metrics = None
-        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        eval_loop = (
+            self.prediction_loop
+            if self.args.use_legacy_prediction_loop
+            else self.evaluation_loop
+        )
         try:
             output = eval_loop(
                 eval_dataloader,
@@ -177,7 +140,9 @@ class SketchReader(Trainer):
         # )
         self.log(metrics)
 
-        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, metrics)
+        self.control = self.callback_handler.on_evaluate(
+            self.args, self.state, self.control, metrics
+        )
         self._memory_tracker.stop_and_update_metrics(metrics)
 
         return metrics
@@ -188,6 +153,36 @@ class IntensiveReader(Trainer):
         super().__init__(*args, **kwargs)
         self.eval_examples = eval_examples
         self.data_args = data_args
+
+    def free_memory(self):
+        self.model.to("cpu")
+        self._optimizer_to("cpu")
+        self._scheduler_to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def _optimizer_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.optimizer.state.values():
+            # Not sure there are any global tensors in the state dict
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
+            elif isinstance(param, dict):
+                for subparam in param.values():
+                    if isinstance(subparam, torch.Tensor):
+                        subparam.data = subparam.data.to(device)
+                        if subparam._grad is not None:
+                            subparam._grad.data = subparam._grad.data.to(device)
+
+    def _scheduler_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.lr_scheduler.__dict__.values():
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
 
     def post_process_function(
         self,
@@ -209,14 +204,22 @@ class IntensiveReader(Trainer):
         # Format the result to the format the metric expects.
 
         formatted_predictions = [
-            {"id": k, "prediction_text": v, "no_answer_probability": scores_diff_json[k]}
+            {
+                "id": k,
+                "prediction_text": v,
+                "no_answer_probability": scores_diff_json[k],
+            }
             for k, v in predictions.items()
         ]
         if mode == "predict":
             return formatted_predictions
         else:
-            references = [{"id": ex["guid"], "answers": ex["answers"]} for ex in eval_examples]
-            return EvalPrediction(predictions=formatted_predictions, label_ids=references)
+            references = [
+                {"id": ex["guid"], "answers": ex["answers"]} for ex in eval_examples
+            ]
+            return EvalPrediction(
+                predictions=formatted_predictions, label_ids=references
+            )
 
     def compute_predictions(
         self,
@@ -249,7 +252,9 @@ class IntensiveReader(Trainer):
 
         all_predictions = collections.OrderedDict()
         all_nbest_json = collections.OrderedDict()
-        scores_diff_json = collections.OrderedDict() if version_2_with_negative else None
+        scores_diff_json = (
+            collections.OrderedDict() if version_2_with_negative else None
+        )
 
         # Let's loop over all the examples!
         for example_index, example in enumerate(tqdm(examples)):
@@ -276,10 +281,15 @@ class IntensiveReader(Trainer):
                 # Optional `token_is_max_context`,
                 # if provided we will remove answers that do not have the maximum context
                 # available in the current feature.
-                token_is_max_context = features[feature_index].get("token_is_max_context", None)
+                token_is_max_context = features[feature_index].get(
+                    "token_is_max_context", None
+                )
 
                 # Update minimum null prediction.
-                if min_null_prediction is None or min_null_prediction["score"] > feature_null_score:
+                if (
+                    min_null_prediction is None
+                    or min_null_prediction["score"] > feature_null_score
+                ):
                     min_null_prediction = {
                         "offsets": (0, 0),
                         "score": feature_null_score,
@@ -289,8 +299,12 @@ class IntensiveReader(Trainer):
 
                 # Go through all possibilities for the {top k} greater start and end logits
                 # top k = n_best_size if not beam_based else n_start_top, n_end_top
-                start_indexes = np.argsort(start_logits)[-1 : -n_best_size - 1 : -1].tolist()
-                end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
+                start_indexes = np.argsort(start_logits)[
+                    -1 : -n_best_size - 1 : -1
+                ].tolist()
+                end_indexes = np.argsort(end_logits)[
+                    -1 : -n_best_size - 1 : -1
+                ].tolist()
 
                 for start_index in start_indexes:
                     for end_index in end_indexes:
@@ -305,18 +319,26 @@ class IntensiveReader(Trainer):
                         ):
                             continue
                         # Don't consider answers with a length negative or > max_answer_length.
-                        if end_index < start_index or end_index - start_index + 1 > max_answer_length:
+                        if (
+                            end_index < start_index
+                            or end_index - start_index + 1 > max_answer_length
+                        ):
                             continue
                         # Don't consider answer that don't have the maximum context available
                         # (if such information is provided).
-                        if token_is_max_context is not None and not token_is_max_context.get(
-                            str(start_index), False
+                        if (
+                            token_is_max_context is not None
+                            and not token_is_max_context.get(str(start_index), False)
                         ):
                             continue
                         prelim_predictions.append(
                             {
-                                "offsets": (offset_mapping[start_index][0], offset_mapping[end_index][1]),
-                                "score": start_logits[start_index] + end_logits[end_index],
+                                "offsets": (
+                                    offset_mapping[start_index][0],
+                                    offset_mapping[end_index][1],
+                                ),
+                                "score": start_logits[start_index]
+                                + end_logits[end_index],
                                 "start_logit": start_logits[start_index],
                                 "end_logit": end_logits[end_index],
                             }
@@ -328,10 +350,14 @@ class IntensiveReader(Trainer):
                 null_score = min_null_prediction["score"]
 
             # Only keep the best `n_best_size` predictions
-            predictions = sorted(prelim_predictions, key=lambda x: x["score"], reverse=True)[:n_best_size]
+            predictions = sorted(
+                prelim_predictions, key=lambda x: x["score"], reverse=True
+            )[:n_best_size]
 
             # Add back the minimum null prediction if it was removed because of its low score.
-            if version_2_with_negative and not any(p["offsets"] == (0, 0) for p in predictions):
+            if version_2_with_negative and not any(
+                p["offsets"] == (0, 0) for p in predictions
+            ):
                 predictions.append(min_null_prediction)
 
             # Use the offsets to gather the answer text in the original context.
@@ -342,7 +368,9 @@ class IntensiveReader(Trainer):
 
             # In the very rare edge case we have not a single non-null prediction,
             # we create a fake prediction to avoid failure.
-            if len(predictions) == 0 or (len(predictions) == 1 and predictions[0]["text"] == ""):
+            if len(predictions) == 0 or (
+                len(predictions) == 1 and predictions[0]["text"] == ""
+            ):
                 predictions.insert(
                     0,
                     {
@@ -371,7 +399,9 @@ class IntensiveReader(Trainer):
                 # Otherwise we first need to find the best non-empty prediction.
                 # print(i, len(predictions), type(predictions), predictions, predictions[0])
                 i = 0
-                while i < len(predictions) and predictions[i]["text"] == "":  # i == 2, len(predictions)=2
+                while (
+                    i < len(predictions) and predictions[i]["text"] == ""
+                ):  # i == 2, len(predictions)=2
                     i += 1
 
                 if i != len(predictions):
@@ -379,9 +409,13 @@ class IntensiveReader(Trainer):
 
                     # Then we compare to the null prediction using the threshold.
                     score_diff = (
-                        null_score - best_non_null_pred["start_logit"] - best_non_null_pred["end_logit"]
+                        null_score
+                        - best_non_null_pred["start_logit"]
+                        - best_non_null_pred["end_logit"]
                     )
-                    scores_diff_json[example["guid"]] = float(score_diff)  # To be JSON-serializable.
+                    scores_diff_json[example["guid"]] = float(
+                        score_diff
+                    )  # To be JSON-serializable.
                     if score_diff > null_score_diff_threshold:
                         all_predictions[example["guid"]] = ""
                     else:
@@ -393,7 +427,11 @@ class IntensiveReader(Trainer):
             # Make `predictions` JSON-serializable by casting np.float back to float.
             all_nbest_json[example["guid"]] = [
                 {
-                    k: (float(v) if isinstance(v, (np.float16, np.float32, np.float64)) else v)
+                    k: (
+                        float(v)
+                        if isinstance(v, (np.float16, np.float32, np.float64))
+                        else v
+                    )
                     for k, v in pred.items()
                 }
                 for pred in predictions
@@ -475,7 +513,11 @@ class IntensiveReader(Trainer):
 
         compute_metrics = self.compute_metrics
         self.compute_metrics = None
-        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        eval_loop = (
+            self.prediction_loop
+            if self.args.use_legacy_prediction_loop
+            else self.evaluation_loop
+        )
         try:
             output = eval_loop(
                 eval_dataloader,
@@ -525,19 +567,31 @@ class IntensiveReader(Trainer):
                 writer.write("%s = %s\n" % (key, str(metrics[key])))
             writer.write("\n")
 
-        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, metrics)
+        self.control = self.callback_handler.on_evaluate(
+            self.args, self.state, self.control, metrics
+        )
 
         self._memory_tracker.stop_and_update_metrics(metrics)
 
         return metrics
 
-    def predict(self, predict_dataset, predict_examples, ignore_keys=None, metric_key_prefix: str = "test"):
+    def predict(
+        self,
+        predict_dataset,
+        predict_examples,
+        ignore_keys=None,
+        metric_key_prefix: str = "test",
+    ):
         predict_dataloader = self.get_test_dataloader(predict_dataset)
 
         # Temporarily disable metric computation, we will do it in the loop here.
         compute_metrics = self.compute_metrics
         self.compute_metrics = None
-        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        eval_loop = (
+            self.prediction_loop
+            if self.args.use_legacy_prediction_loop
+            else self.evaluation_loop
+        )
         try:
             output = eval_loop(
                 predict_dataloader,
@@ -564,7 +618,9 @@ class IntensiveReader(Trainer):
                 metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
 
         return PredictionOutput(
-            predictions=predictions.predictions, label_ids=predictions.label_ids, metrics=metrics
+            predictions=predictions.predictions,
+            label_ids=predictions.label_ids,
+            metrics=metrics,
         )
 
 
@@ -590,7 +646,9 @@ class RearVerifier:
         for key in score_ext.keys():
             if key not in all_scores:
                 all_scores[key] = []
-            all_scores[key].append([self.beta1 * score_ext[key], self.beta2 * score_diff[key]])
+            all_scores[key].append(
+                [self.beta1 * score_ext[key], self.beta2 * score_diff[key]]
+            )
         output_scores = {}
         for key, scores in all_scores.items():
             mean_score = sum(scores) / float(len(scores))
@@ -606,7 +664,9 @@ class RearVerifier:
 
         output_predictions = {}
         for key, entry_map in all_nbest.items():
-            sorted_texts = sorted(entry_map.keys(), key=lambda x: entry_map[x], reverse=True)
+            sorted_texts = sorted(
+                entry_map.keys(), key=lambda x: entry_map[x], reverse=True
+            )
             best_text = sorted_texts[0]
             output_predictions[key] = best_text
 
@@ -662,7 +722,9 @@ class RetroReader:
     ):
         if isinstance(context, list):
             context = " ".join(context)
-        predict_examples = Dataset.from_dict({"example_id": ["0"], "question": [query], "context": [context]})
+        predict_examples = Dataset.from_dict(
+            {"example_id": ["0"], "question": [query], "context": [context]}
+        )
         sketch_features = predict_examples.map(
             self.sketch_prep_fn,
             batched=self.is_sketch_batched,
@@ -674,7 +736,9 @@ class RetroReader:
             remove_columns=predict_examples.column_names,
         )
         score_ext = self.sketch_reader.predict(sketch_features, predict_examples)
-        _, nbest_preds, score_diff, _ = self.intensive_reader.predict(intensive_features, predict_examples)
+        _, nbest_preds, score_diff, _ = self.intensive_reader.predict(
+            intensive_features, predict_examples
+        )
         predictions, scores = self.rear_verifier(score_ext, score_diff, nbest_preds)
         return predictions, scores
 
@@ -685,7 +749,14 @@ class RetroReader:
         # ------------------------------------------------------
         sketch_reader_result = self.sketch_reader.train()
         # self.save_and_log(self.sketch_reader, sketch_reader_result, module_name="sketch")
+        self.sketch_reader.free_memory()
+        self.sketch_reader.save_model()
+        self.sketch_reader.save_state()
+
         intensive_reader_result = self.intensive_reader.train()
+        self.intensive_reader.free_memory()
+        self.intensive_reader.save_model()
+        self.intensive_reader.save_state()
         # self.save_and_log(self.intensive_reader, intensive_reader_result, module_name="intensive")
 
     def preprocess_examples(self, module_name="sketch"):
@@ -720,7 +791,9 @@ class RetroReader:
 
     def init_module(self, module_name="sketch"):
         if module_name == "sketch":
-            sketch_reader_config = AutoConfig.from_pretrained(self.model_name_or_path, num_labels=2)
+            sketch_reader_config = AutoConfig.from_pretrained(
+                self.model_name_or_path, num_labels=2
+            )
             sketch_reader_model = RobertaForSequenceClassification.from_pretrained(
                 self.model_name_or_path, config=sketch_reader_config
             )
@@ -742,12 +815,19 @@ class RetroReader:
             # self.training_args.load_best_model_at_end = True
             sketch_reader_args = copy(self.training_args)
             sketch_reader_args.metric_for_best_model = "eval_f1"
+            sketch_reader_args.output_dir = self.training_args.output_dir + "/sketch"
             self.sketch_reader = SketchReader(
                 model=sketch_reader_model,
                 args=sketch_reader_args,
-                train_dataset=self.train_dataset_for_sketch_reader if self.training_args.do_train else None,
-                eval_dataset=self.eval_dataset_for_sketch_reader if self.training_args.do_eval else None,
-                eval_examples=self.eval_examples if self.training_args.do_eval else None,
+                train_dataset=self.train_dataset_for_sketch_reader
+                if self.training_args.do_train
+                else None,
+                eval_dataset=self.eval_dataset_for_sketch_reader
+                if self.training_args.do_eval
+                else None,
+                eval_examples=self.eval_examples
+                if self.training_args.do_eval
+                else None,
                 tokenizer=self.tokenizer,
                 data_collator=self.data_collator,
                 # post_process_function=self.mrc_processor.post_processing_function,
@@ -755,7 +835,9 @@ class RetroReader:
             )
 
         elif module_name == "intensive":
-            intensive_reader_config = AutoConfig.from_pretrained(self.model_name_or_path)
+            intensive_reader_config = AutoConfig.from_pretrained(
+                self.model_name_or_path
+            )
             intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
                 self.model_name_or_path, config=intensive_reader_config
             )
@@ -772,6 +854,9 @@ class RetroReader:
             # self.training_args.metric_for_best_model = "eval_exact"
             intensive_reader_args = copy(self.training_args)
             intensive_reader_args.metric_for_best_model = "eval_exact"
+            intensive_reader_args.output_dir = (
+                self.training_args.output_dir + "/intensive"
+            )
             self.intensive_reader = IntensiveReader(
                 model=intensive_reader_model,
                 args=intensive_reader_args,
@@ -779,8 +864,12 @@ class RetroReader:
                 train_dataset=self.train_dataset_for_intensive_reader
                 if self.training_args.do_train
                 else None,
-                eval_dataset=self.eval_dataset_for_intensive_reader if self.training_args.do_eval else None,
-                eval_examples=self.eval_examples if self.training_args.do_eval else None,
+                eval_dataset=self.eval_dataset_for_intensive_reader
+                if self.training_args.do_eval
+                else None,
+                eval_examples=self.eval_examples
+                if self.training_args.do_eval
+                else None,
                 tokenizer=self.tokenizer,
                 data_collator=self.data_collator,
                 # post_process_function=self.mrc_processor.post_processing_function,
@@ -807,7 +896,7 @@ class RetroReader:
             else self.eval_dataset_for_intensive_reader,
             eval_examples=self.eval_examples,
         )
-        print(metrics)
+        # print(metrics)
         max_eval_samples = (
             self.data_args.max_eval_samples
             if self.data_args.max_eval_samples is not None

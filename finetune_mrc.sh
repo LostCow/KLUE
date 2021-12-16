@@ -13,7 +13,7 @@ python run_qa.py \
     --save_total_limit 2 \
     --output_dir outputs \
     --version_2_with_negative \
-    --num_train_epochs 5 \
+    --num_train_epochs 3 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 16 \
     --gradient_accumulation_steps 8 \
