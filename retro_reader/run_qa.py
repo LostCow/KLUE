@@ -75,44 +75,6 @@ def main():
     train_dataset = Dataset.from_pandas(train_df)
     valid_dataset = Dataset.from_pandas(valid_df)
 
-    # column_names = train_dataset.column_names
-
-    # mrc_processor = DataProcessor(
-    #     data_args=data_args,
-    #     training_args=training_args,
-    #     tokenizer=tokenizer,
-    #     column_names=column_names,
-    # )
-    # Set up train data
-    # with training_args.main_process_first(desc="train dataset map pre-processing"):
-    #     train_dataset = train_dataset.map(
-    #         mrc_processor.prepare_train_features,
-    #         batched=True,
-    #         num_proc=data_args.preprocessing_num_workers,
-    #         remove_columns=column_names,
-    #         load_from_cache_file=not data_args.overwrite_cache,
-    #         desc="Running tokenizer on train dataset",
-    #     )
-
-    # formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    # file_handler = logging.FileHandler("my.log")
-    # file_handler.setFormatter(formatter)
-    # logger.addHandler(file_handler)
-    # logger.info(f"{train_dataset}")
-
-    # Set up valid data
-
-    # with training_args.main_process_first(desc="validation dataset map pre-processing"):
-    #     eval_dataset = valid_dataset.map(
-    #         mrc_processor.prepare_validation_features,
-    #         batched=True,
-    #         num_proc=data_args.preprocessing_num_workers,
-    #         remove_columns=column_names,
-    #         load_from_cache_file=not data_args.overwrite_cache,
-    #         desc="Running tokenizer on validation dataset",
-    #     )
-    # logger.info(f"{eval_dataset}")
-
     data_collator = (
         default_data_collator
         if data_args.pad_to_max_length
@@ -129,48 +91,11 @@ def main():
         eval_examples=valid_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        # post_process_function=mrc_processor.post_processing_function,
-        # compute_metrics=compute_metrics,
     )
-    # trainer = QuestionAnsweringTrainer(
-    #     model=model,
-    #     args=training_args,
-    #     train_dataset=train_dataset if training_args.do_train else None,
-    #     eval_dataset=eval_dataset if training_args.do_eval else None,
-    #     eval_examples=valid_dataset if training_args.do_eval else None,
-    #     tokenizer=tokenizer,
-    #     data_collator=data_collator,
-    #     post_process_function=mrc_processor.post_processing_function,
-    #     compute_metrics=compute_metrics,
-    # )
 
     trainer.train()
 
-    # Training
-    # train_result = trainer.train()
-    # trainer.save_model()
-    # metrics = train_result.metrics
-    # max_train_samples = (
-    #     data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-    # )
-    # metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-
-    # trainer.log_metrics("train", metrics)
-    # trainer.save_metrics("train", metrics)
-    # trainer.save_state()
-
-    # # Evaluation
-    # logger.info("*** Evaluate ***")
-    # metrics = trainer.evaluate()
-    # max_eval_samples = (
-    #     data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
-    # )
-    # metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
-
-    # trainer.log_metrics("eval", metrics)
-    # trainer.save_metrics("eval", metrics)
-
 
 if __name__ == "__main__":
-    # os.environ["WANDB_DISABLED"] = "true"
+    os.environ["WANDB_DISABLED"] = "true"
     main()

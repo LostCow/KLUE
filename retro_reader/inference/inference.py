@@ -22,7 +22,10 @@ from transformers import PreTrainedTokenizer
 from typing import List
 import datasets
 from torch.utils.data import Dataset
-from transformers.data.processors.squad import SquadExample, squad_convert_examples_to_features
+from transformers.data.processors.squad import (
+    SquadExample,
+    squad_convert_examples_to_features,
+)
 from transformers.data.processors.utils import InputFeatures
 import json
 import collections
@@ -45,7 +48,9 @@ def get_score1():
     best_cof = [1]
     all_scores = collections.OrderedDict()
     idx = 0
-    for input_file in "sketch_reader_outputs/cls_score.json,intensive_reader_outputs/null_odds.json".split(
+    for (
+        input_file
+    ) in "sketch_reader_outputs/cls_score.json,intensive_reader_outputs/null_odds.json".split(
         ","
     ):
         with open(input_file, "r") as reader:
@@ -72,11 +77,15 @@ def get_score1():
                 if key not in all_nbest:
                     all_nbest[key] = collections.defaultdict(float)
                 for entry in entries:
-                    all_nbest[key][entry["text"]] += best_cof[idx] * entry["probability"]
+                    all_nbest[key][entry["text"]] += (
+                        best_cof[idx] * entry["probability"]
+                    )
         idx += 1
     output_predictions = {}
     for (key, entry_map) in all_nbest.items():
-        sorted_texts = sorted(entry_map.keys(), key=lambda x: entry_map[x], reverse=True)
+        sorted_texts = sorted(
+            entry_map.keys(), key=lambda x: entry_map[x], reverse=True
+        )
         best_text = sorted_texts[0]
         output_predictions[key] = best_text
 
@@ -86,9 +95,13 @@ def get_score1():
         if output_scores[qid] > best_th:
             output_predictions[qid] = ""
 
-    output_prediction_file = KLUE_MRC_OUTPUT
+    output_prediction_file = os.path.join(
+        os.environ.get("SM_OUTPUT_DATA_DIR", "/output"), KLUE_MRC_OUTPUT
+    )
     with open(output_prediction_file, "w") as writer:
         writer.write(json.dumps(output_predictions, indent=4) + "\n")
+
+    return output_predictions
 
 
 def load_model_and_type(model_dir: str):
@@ -110,7 +123,9 @@ def load_model_and_type(model_dir: str):
 
 @torch.no_grad()
 def inference() -> None:
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, MyTrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, MyTrainingArguments)
+    )
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -120,14 +135,18 @@ def inference() -> None:
 
     tokenizer = AutoTokenizer.from_pretrained("klue/roberta-large")
 
-    valid_data_path = os.path.join(os.environ.get("SM_CHANNEL_EVAL", "/data"), "klue-mrc-v1.1_test.json")
+    valid_data_path = os.path.join(
+        os.environ.get("SM_CHANNEL_EVAL", "/data"), "klue-mrc-v1.1_test.json"
+    )
     valid_df = create_pandas(read_json(valid_data_path))
     valid_dataset = datasets.Dataset.from_pandas(valid_df)
 
     data_collator = (
         default_data_collator
         if data_args.pad_to_max_length
-        else DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None)
+        else DataCollatorWithPadding(
+            tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None
+        )
     )
     trainer = RetroReader(
         sketch_model_name_or_path=os.path.join(model_dir, "sketch_reader"),

@@ -14,9 +14,8 @@ python run_qa.py \
     --version_2_with_negative True \
     --num_train_epochs 5 \
     --logging_steps 100 \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 8 \
-    --gradient_accumulation_steps 8 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 4 \
     --load_best_model_at_end True \
     --fp16 True \
-    --report_to 'wandb'

@@ -41,6 +41,36 @@ class SketchReader(Trainer):
         super().__init__(*args, **kwargs)
         self.eval_examples = eval_examples
 
+    def free_memory(self):
+        self.model.to("cpu")
+        self._optimizer_to("cpu")
+        self._scheduler_to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def _optimizer_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.optimizer.state.values():
+            # Not sure there are any global tensors in the state dict
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
+            elif isinstance(param, dict):
+                for subparam in param.values():
+                    if isinstance(subparam, torch.Tensor):
+                        subparam.data = subparam.data.to(device)
+                        if subparam._grad is not None:
+                            subparam._grad.data = subparam._grad.data.to(device)
+
+    def _scheduler_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.lr_scheduler.__dict__.values():
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
+
     def post_process_function(
         self,
         output: Union[np.ndarray, EvalLoopOutput],
@@ -799,7 +829,7 @@ class RetroReader:
             sketch_reader_config = AutoConfig.from_pretrained(
                 self.model_name_or_path, num_labels=2
             )
-            sketch_reader_model = RobertaForSequenceClassification.from_pretrained(
+            sketch_reader_model = BertForSequenceClassification.from_pretrained(
                 self.model_name_or_path, config=sketch_reader_config
             )
             (
@@ -816,8 +846,6 @@ class RetroReader:
 
                 return {"f1": f1, "accuracy": acc, "loss": p.metrics["eval_loss"]}
 
-            # self.training_args.metric_for_best_model = self.data_args.load_best_model_at_end_sketch_reader
-            # self.training_args.load_best_model_at_end = True
             sketch_reader_args = copy(self.training_args)
             sketch_reader_args.metric_for_best_model = "eval_f1"
             sketch_reader_args.output_dir = self.training_args.output_dir + "/sketch"
@@ -843,7 +871,7 @@ class RetroReader:
             intensive_reader_config = AutoConfig.from_pretrained(
                 self.model_name_or_path
             )
-            intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
+            intensive_reader_model = BertForQuestionAnsweringAVPool.from_pretrained(
                 self.model_name_or_path, config=intensive_reader_config
             )
             (
