@@ -4,7 +4,14 @@ from torch import nn
 import numpy as np
 from torch.nn.modules import module
 
-from transformers import Trainer, AutoConfig
+from transformers import (
+    Trainer,
+    AutoConfig,
+    AutoTokenizer,
+    default_data_collator,
+    DataCollatorWithPadding,
+    AutoModelForSequenceClassification,
+)
 from transformers.trainer_utils import (
     EvalLoopOutput,
     PredictionOutput,
@@ -12,11 +19,16 @@ from transformers.trainer_utils import (
     speed_metrics,
     denumpify_detensorize,
 )
+import datasets
 from datasets.load import load_metric
 from datasets import Dataset
 
 from processor import DataProcessor
-from model import RobertaForSequenceClassification, RobertaForQuestionAnsweringAVPool
+from model import (
+    RobertaForSequenceClassification,
+    RobertaForQuestionAnsweringAVPool,
+    ElectraForQuestionAnsweringAVPool,
+)
 
 import collections
 import time
@@ -75,49 +87,6 @@ class SketchReader(Trainer):
         else:
             return final_map
 
-    # def post_process_function(
-    #     self,
-    #     output: Union[np.ndarray, EvalLoopOutput],
-    #     eval_examples: Dataset,
-    #     eval_dataset: Dataset,
-    #     mode="eval",
-    # ):
-    #     if isinstance(output, EvalLoopOutput):
-    #         logits = output.predictions
-    #     else:
-    #         logits = output
-    #     print(logits)
-
-    #     example_id_to_index = {k: i for i, k in enumerate(eval_examples["guid"])}
-    #     features_per_example = collections.defaultdict(list)
-    #     for i, feature in enumerate(eval_dataset):
-    #         features_per_example[example_id_to_index[feature["example_id"]]].append(i)
-
-    #     count_map = {k: len(v) for k, v in features_per_example.items()}
-
-    #     logits_ans = np.zeros(len(count_map))
-    #     logits_na = np.zeros(len(count_map))
-    #     for example_index, example in enumerate(tqdm(eval_examples)):
-    #         feature_indices = features_per_example[example_index]
-    #         n_strides = count_map[example_index]
-    #         logits_ans[example_index] += logits[example_index, 0] / n_strides
-    #         logits_na[example_index] += logits[example_index, 1] / n_strides
-
-    #     # Calculate E-FV score
-    #     score_ext = logits_ans - logits_na
-
-    #     # Save external front verification score
-    #     final_map = dict(zip(eval_examples["guid"], score_ext.tolist()))
-    #     with open(os.path.join(self.args.output_dir, "cls_score.json"), "w") as writer:
-    #         writer.write(json.dumps(final_map, indent=4) + "\n")
-    #     if mode == "eval":
-    #         return EvalPrediction(
-    #             predictions=logits,
-    #             label_ids=output.label_ids,
-    #         )
-    #     else:
-    #         return final_map
-
     def evaluate(
         self,
         eval_dataset: Optional[Dataset] = None,
@@ -139,26 +108,18 @@ class SketchReader(Trainer):
             output = eval_loop(
                 eval_dataloader,
                 description="Evaluation",
-                # No point gathering the predictions if there are no metrics, otherwise we defer to
-                # self.args.prediction_loss_only
-                # prediction_loss_only=True if self.compute_metrics is None else None,
                 ignore_keys=ignore_keys,
-                # metric_key_prefix=metric_key_prefix,
             )
         finally:
             self.compute_metrics = compute_metrics
 
         if self.post_process_function is not None and self.compute_metrics is not None:
-            # print("--------------")
-            # print(output)
-            # print("--------------")
             metrics = self.compute_metrics(output)
 
             eval_preds = self.post_process_function(
                 eval_examples=eval_examples, eval_dataset=eval_dataset, output=output
             )
 
-            # Prefix all keys with metric_key_prefix + '_'
             for key in list(metrics.keys()):
                 if not key.startswith(f"{metric_key_prefix}_"):
                     metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
@@ -166,15 +127,6 @@ class SketchReader(Trainer):
         else:
             metrics = {}
 
-        total_batch_size = self.args.eval_batch_size * self.args.world_size
-        # metrics.update(
-        #     speed_metrics(
-        #         metric_key_prefix,
-        #         start_time,
-        #         num_samples=output.num_samples,
-        #         num_steps=math.ceil(output.num_samples / total_batch_size),
-        #     )
-        # )
         self.log(metrics)
 
         self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, metrics)
@@ -196,6 +148,7 @@ class IntensiveReader(Trainer):
         eval_dataset: Dataset,
         mode="eval",
     ) -> Union[List[Dict[str, Any]], EvalPrediction]:
+
         predictions, _, _, scores_diff_json = self.compute_predictions(
             eval_examples,
             eval_dataset,
@@ -206,7 +159,6 @@ class IntensiveReader(Trainer):
             null_score_diff_threshold=self.data_args.null_score_diff_threshold,
             output_dir=self.args.output_dir,
         )
-        # Format the result to the format the metric expects.
 
         formatted_predictions = [
             {"id": k, "prediction_text": v, "no_answer_probability": scores_diff_json[k]}
@@ -419,46 +371,6 @@ class IntensiveReader(Trainer):
 
         return all_predictions, all_nbest_json, scores_diff_json, scores_diff_json
 
-    # def evaluate(
-    #     self, eval_dataset=None, eval_examples=None, ignore_keys=None, metric_key_prefix: str = "eval"
-    # ):
-    #     eval_dataset = self.eval_dataset if eval_dataset is None else eval_dataset
-    #     eval_dataloader = self.get_eval_dataloader(eval_dataset)
-    #     eval_examples = self.eval_examples if eval_examples is None else eval_examples
-
-    #     # Temporarily disable metric computation, we will do it in the loop here.
-    #     compute_metrics = self.compute_metrics
-    #     self.compute_metrics = None
-    #     eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
-    #     try:
-    #         output = eval_loop(
-    #             eval_dataloader,
-    #             description="Evaluation",
-    #             # No point gathering the predictions if there are no metrics, otherwise we defer to
-    #             # self.args.prediction_loss_only
-    #             prediction_loss_only=True if compute_metrics is None else None,
-    #             ignore_keys=ignore_keys,
-    #         )
-    #     finally:
-    #         self.compute_metrics = compute_metrics
-
-    #     if self.post_process_function is not None and self.compute_metrics is not None:
-    #         eval_preds = self.post_process_function(eval_examples, eval_dataset, output.predictions)
-    #         # eval_preds = self.post_process_function(eval_examples, eval_dataset, output)
-    #         metrics = self.compute_metrics(eval_preds)
-
-    #         # Prefix all keys with metric_key_prefix + '_'
-    #         for key in list(metrics.keys()):
-    #             if not key.startswith(f"{metric_key_prefix}_"):
-    #                 metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
-
-    #         self.log(metrics)
-    #     else:
-    #         metrics = {}
-
-    #     self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, metrics)
-    #     return metrics
-
     def evaluate(
         self,
         eval_dataset: Optional[Dataset] = None,
@@ -506,15 +418,6 @@ class IntensiveReader(Trainer):
                 if not key.startswith(f"{metric_key_prefix}_"):
                     metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
 
-            total_batch_size = self.args.eval_batch_size * self.args.world_size
-            # metrics.update(
-            #     speed_metrics(
-            #         metric_key_prefix,
-            #         start_time,
-            #         num_samples=output.num_samples,
-            #         num_steps=math.ceil(output.num_samples / total_batch_size),
-            #     )
-            # )
             self.log(metrics)
 
         # Log and save evaluation results
@@ -531,165 +434,112 @@ class IntensiveReader(Trainer):
 
         return metrics
 
-    def predict(self, predict_dataset, predict_examples, ignore_keys=None, metric_key_prefix: str = "test"):
-        predict_dataloader = self.get_test_dataloader(predict_dataset)
 
-        # Temporarily disable metric computation, we will do it in the loop here.
-        compute_metrics = self.compute_metrics
-        self.compute_metrics = None
-        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
-        try:
-            output = eval_loop(
-                predict_dataloader,
-                description="Prediction",
-                # No point gathering the predictions if there are no metrics, otherwise we defer to
-                # self.args.prediction_loss_only
-                prediction_loss_only=True if compute_metrics is None else None,
-                ignore_keys=ignore_keys,
-            )
-        finally:
-            self.compute_metrics = compute_metrics
+# class RearVerifier:
+#     def __init__(
+#         self,
+#         beta1: int = 1,
+#         beta2: int = 1,
+#         best_cof: int = 1,
+#     ):
+#         self.beta1 = beta1
+#         self.beta2 = beta2
+#         self.best_cof = best_cof
 
-        if self.post_process_function is None or self.compute_metrics is None:
-            return output
+#     def __call__(
+#         self,
+#         score_ext: Dict[str, float],
+#         score_diff: Dict[str, float],
+#         nbest_preds: Dict[str, Dict[int, Dict[str, float]]],
+#     ):
+#         all_scores = collections.OrderedDict()
+#         assert score_ext.keys() == score_diff.keys()
+#         for key in score_ext.keys():
+#             if key not in all_scores:
+#                 all_scores[key] = []
+#             all_scores[key].append([self.beta1 * score_ext[key], self.beta2 * score_diff[key]])
+#         output_scores = {}
+#         for key, scores in all_scores.items():
+#             mean_score = sum(scores) / float(len(scores))
+#             output_scores[key] = mean_score
 
-        predictions = self.post_process_function(
-            predict_examples, predict_dataset, output.predictions, "predict"
-        )
-        metrics = self.compute_metrics(predictions)
+#         all_nbest = collections.OrderedDict()
+#         for key, entries in nbest_preds.items():
+#             if key not in all_nbest:
+#                 all_nbest[key] = collections.defaultdict(float)
+#             for entry in entries:
+#                 prob = self.best_cof * entry["probability"]
+#                 all_nbest[key][entry["text"]] += prob
 
-        # Prefix all keys with metric_key_prefix + '_'
-        for key in list(metrics.keys()):
-            if not key.startswith(f"{metric_key_prefix}_"):
-                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+#         output_predictions = {}
+#         for key, entry_map in all_nbest.items():
+#             sorted_texts = sorted(entry_map.keys(), key=lambda x: entry_map[x], reverse=True)
+#             best_text = sorted_texts[0]
+#             output_predictions[key] = best_text
 
-        return PredictionOutput(
-            predictions=predictions.predictions, label_ids=predictions.label_ids, metrics=metrics
-        )
+#         for qid in output_predictions.keys():
+#             # if output_scores[qid] > thresh:
+#             if output_scores[qid] > 1:
+#                 output_predictions[qid] = ""
 
-
-class RearVerifier:
-    def __init__(
-        self,
-        beta1: int = 1,
-        beta2: int = 1,
-        best_cof: int = 1,
-    ):
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.best_cof = best_cof
-
-    def __call__(
-        self,
-        score_ext: Dict[str, float],
-        score_diff: Dict[str, float],
-        nbest_preds: Dict[str, Dict[int, Dict[str, float]]],
-    ):
-        all_scores = collections.OrderedDict()
-        assert score_ext.keys() == score_diff.keys()
-        for key in score_ext.keys():
-            if key not in all_scores:
-                all_scores[key] = []
-            all_scores[key].append([self.beta1 * score_ext[key], self.beta2 * score_diff[key]])
-        output_scores = {}
-        for key, scores in all_scores.items():
-            mean_score = sum(scores) / float(len(scores))
-            output_scores[key] = mean_score
-
-        all_nbest = collections.OrderedDict()
-        for key, entries in nbest_preds.items():
-            if key not in all_nbest:
-                all_nbest[key] = collections.defaultdict(float)
-            for entry in entries:
-                prob = self.best_cof * entry["probability"]
-                all_nbest[key][entry["text"]] += prob
-
-        output_predictions = {}
-        for key, entry_map in all_nbest.items():
-            sorted_texts = sorted(entry_map.keys(), key=lambda x: entry_map[x], reverse=True)
-            best_text = sorted_texts[0]
-            output_predictions[key] = best_text
-
-        for qid in output_predictions.keys():
-            # if output_scores[qid] > thresh:
-            if output_scores[qid] > 1:
-                output_predictions[qid] = ""
-
-        return output_predictions, output_scores
+#         return output_predictions, output_scores
 
 
 class RetroReader:
     def __init__(
         self,
-        model_name_or_path="klue/roberta-large",
-        training_args=None,
+        sketch_model_name_or_path="klue/roberta-large",
+        intensive_model_name_or_path="klue/roberta-large",
+        base_training_args=None,
         data_args=None,
         train_examples=None,
         eval_examples=None,
-        tokenizer=None,
-        data_collator=None,
-        post_process_function=None,
-        # compute_metrics=None,
+        test_examples=None,
     ):
-        self.model_name_or_path = model_name_or_path
-        self.training_args = training_args
+        self.sketch_model_name_or_path = sketch_model_name_or_path
+        self.intensive_model_name_or_path = intensive_model_name_or_path
+        self.base_training_args = base_training_args
         self.data_args = data_args
         self.train_examples = train_examples
         self.eval_examples = eval_examples
-        self.tokenizer = tokenizer
-        self.data_collator = data_collator
-        self.post_process_function = post_process_function
-        # self.compute_metrics = compute_metrics
+        self.test_examples = test_examples
 
         self.column_names = self.train_examples.column_names
 
+        self.sketch_tokenizer = AutoTokenizer.from_pretrained(sketch_model_name_or_path, use_fast=True)
+        self.intensive_tokenizer = AutoTokenizer.from_pretrained(intensive_model_name_or_path, use_fast=True)
+
+        self.sketch_data_collator = (
+            default_data_collator
+            if data_args.pad_to_max_length
+            else DataCollatorWithPadding(
+                self.sketch_tokenizer, pad_to_multiple_of=8 if self.base_training_args.fp16 else None
+            )
+        )
+        self.intensive_data_collator = (
+            default_data_collator
+            if data_args.pad_to_max_length
+            else DataCollatorWithPadding(
+                self.intensive_tokenizer, pad_to_multiple_of=8 if self.base_training_args.fp16 else None
+            )
+        )
+
         self.mrc_processor = DataProcessor(
-            data_args=data_args,
-            training_args=training_args,
-            tokenizer=tokenizer,
+            data_args=self.data_args,
+            sketch_tokenizer=self.sketch_tokenizer,
+            intensive_tokenizer=self.intensive_tokenizer,
             column_names=self.column_names,
         )
 
         self.init_module("sketch")
         self.init_module("intensive")
 
-        self.rear_verifier = RearVerifier()
-
-    def __call__(
-        self,
-        query: str,
-        context: Union[str, List[str]],
-    ):
-        if isinstance(context, list):
-            context = " ".join(context)
-        predict_examples = Dataset.from_dict({"example_id": ["0"], "question": [query], "context": [context]})
-        sketch_features = predict_examples.map(
-            self.sketch_prep_fn,
-            batched=self.is_sketch_batched,
-            remove_columns=predict_examples.column_names,
-        )
-        intensive_features = predict_examples.map(
-            self.intensive_prep_fn,
-            batched=self.is_intensive_batched,
-            remove_columns=predict_examples.column_names,
-        )
-        score_ext = self.sketch_reader.predict(sketch_features, predict_examples)
-        _, nbest_preds, score_diff, _ = self.intensive_reader.predict(intensive_features, predict_examples)
-        predictions, scores = self.rear_verifier(score_ext, score_diff, nbest_preds)
-        return predictions, scores
-
     def train(self):
-        # sketch_reader_result = self.sketch_reader.evaluate()
-        # intensive_reader_result = self.intensive_reader.evaluate()
-
-        # ------------------------------------------------------
-        sketch_reader_result = self.sketch_reader.train()
-        # self.save_and_log(self.sketch_reader, sketch_reader_result, module_name="sketch")
-        intensive_reader_result = self.intensive_reader.train()
-        # self.save_and_log(self.intensive_reader, intensive_reader_result, module_name="intensive")
+        self.sketch_reader.train()
+        self.intensive_reader.train()
 
     def preprocess_examples(self, module_name="sketch"):
-        with self.training_args.main_process_first(
+        with self.base_training_args.main_process_first(
             desc=f"train dataset for {module_name} reader map pre-processing"
         ):
             train_dataset = self.train_examples.map(
@@ -703,7 +553,7 @@ class RetroReader:
                 desc=f"Running tokenizer on train dataset for {module_name} reader",
             )
 
-        with self.training_args.main_process_first(
+        with self.base_training_args.main_process_first(
             desc=f"validation dataset for {module_name} reader map pre-processing"
         ):
             eval_dataset = self.eval_examples.map(
@@ -720,45 +570,61 @@ class RetroReader:
 
     def init_module(self, module_name="sketch"):
         if module_name == "sketch":
-            sketch_reader_config = AutoConfig.from_pretrained(self.model_name_or_path, num_labels=2)
-            sketch_reader_model = RobertaForSequenceClassification.from_pretrained(
-                self.model_name_or_path, config=sketch_reader_config
-            )
+            sketch_reader_config = AutoConfig.from_pretrained(self.sketch_model_name_or_path, num_labels=2)
+
+            if "electra" in self.sketch_model_name_or_path:
+                sketch_reader_model = AutoModelForSequenceClassification.from_pretrained(
+                    self.sketch_model_name_or_path, config=sketch_reader_config
+                )
+            else:
+                sketch_reader_model = RobertaForSequenceClassification.from_pretrained(
+                    self.sketch_model_name_or_path, config=sketch_reader_config
+                )
             (
                 self.train_dataset_for_sketch_reader,
                 self.eval_dataset_for_sketch_reader,
             ) = self.preprocess_examples(module_name="sketch")
 
+            accuracy = datasets.load_metric("accuracy").compute
+            precision = datasets.load_metric("precision").compute
+            recall = datasets.load_metric("recall").compute
+            f1 = datasets.load_metric("f1").compute
+
             def compute_metrics_for_sketch_reader(p: EvalPrediction):
-                labels = p.label_ids
-                preds = p.predictions.argmax(-1)
 
-                f1 = f1_score(labels, preds)
-                acc = accuracy_score(labels, preds)
+                predictions = p.predictions.argmax(axis=1)
+                references = p.label_ids
+                metric = accuracy(predictions=predictions, references=references)
+                metric.update(precision(predictions=predictions, references=references))
+                metric.update(recall(predictions=predictions, references=references))
+                metric.update(f1(predictions=predictions, references=references))
 
-                return {"f1": f1, "accuracy": acc, "loss": p.metrics["eval_loss"]}
+                return metric
 
-            # self.training_args.metric_for_best_model = self.data_args.load_best_model_at_end_sketch_reader
-            # self.training_args.load_best_model_at_end = True
-            sketch_reader_args = copy(self.training_args)
+            sketch_reader_args = copy(self.base_training_args)
             sketch_reader_args.metric_for_best_model = "eval_f1"
+            sketch_reader_args.output_dir = "sketch_reader_outputs"
             self.sketch_reader = SketchReader(
                 model=sketch_reader_model,
                 args=sketch_reader_args,
-                train_dataset=self.train_dataset_for_sketch_reader if self.training_args.do_train else None,
-                eval_dataset=self.eval_dataset_for_sketch_reader if self.training_args.do_eval else None,
-                eval_examples=self.eval_examples if self.training_args.do_eval else None,
-                tokenizer=self.tokenizer,
-                data_collator=self.data_collator,
-                # post_process_function=self.mrc_processor.post_processing_function,
+                train_dataset=self.train_dataset_for_sketch_reader if sketch_reader_args.do_train else None,
+                eval_dataset=self.eval_dataset_for_sketch_reader if sketch_reader_args.do_eval else None,
+                eval_examples=self.eval_examples if sketch_reader_args.do_eval else None,
+                tokenizer=self.sketch_tokenizer,
+                data_collator=self.sketch_data_collator,
                 compute_metrics=compute_metrics_for_sketch_reader,
             )
 
         elif module_name == "intensive":
-            intensive_reader_config = AutoConfig.from_pretrained(self.model_name_or_path)
-            intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
-                self.model_name_or_path, config=intensive_reader_config
-            )
+            intensive_reader_config = AutoConfig.from_pretrained(self.intensive_model_name_or_path)
+            if "electra" in self.intensive_model_name_or_path:
+                intensive_reader_model = ElectraForQuestionAnsweringAVPool.from_pretrained(
+                    self.intensive_model_name_or_path, config=intensive_reader_config
+                )
+            else:
+                intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
+                    self.intensive_model_name_or_path, config=intensive_reader_config
+                )
             (
                 self.train_dataset_for_intensive_reader,
                 self.eval_dataset_for_intensive_reader,
@@ -768,52 +634,21 @@ class RetroReader:
                 metric = load_metric("squad_v2")
                 return metric.compute(predictions=p.predictions, references=p.label_ids)
 
-            # self.training_args.metric_for_best_model = self.data_args.load_best_model_at_end_intensive_reader
-            # self.training_args.metric_for_best_model = "eval_exact"
-            intensive_reader_args = copy(self.training_args)
+            intensive_reader_args = copy(self.base_training_args)
             intensive_reader_args.metric_for_best_model = "eval_exact"
+            intensive_reader_args.output_dir = "intensive_reader_outputs"
             self.intensive_reader = IntensiveReader(
                 model=intensive_reader_model,
                 args=intensive_reader_args,
                 data_args=self.data_args,
                 train_dataset=self.train_dataset_for_intensive_reader
-                if self.training_args.do_train
+                if intensive_reader_args.do_train
                 else None,
-                eval_dataset=self.eval_dataset_for_intensive_reader if self.training_args.do_eval else None,
-                eval_examples=self.eval_examples if self.training_args.do_eval else None,
-                tokenizer=self.tokenizer,
-                data_collator=self.data_collator,
-                # post_process_function=self.mrc_processor.post_processing_function,
+                eval_dataset=self.eval_dataset_for_intensive_reader
+                if intensive_reader_args.do_eval
+                else None,
+                eval_examples=self.eval_examples if intensive_reader_args.do_eval else None,
+                tokenizer=self.intensive_tokenizer,
+                data_collator=self.intensive_data_collator,
                 compute_metrics=compute_metrics,
             )
-
-    def save_and_log(self, reader, result, module_name="sketch"):
-        reader.save_model()
-        metrics = result.metrics
-        max_train_samples = (
-            self.data_args.max_train_samples
-            if self.data_args.max_train_samples is not None
-            else len(self.train_examples)
-        )
-        metrics["train_samples"] = min(max_train_samples, len(self.train_examples))
-
-        reader.log_metrics("train", metrics)
-        reader.save_metrics("train", metrics)
-        reader.save_state()
-
-        metrics = reader.evaluate(
-            eval_dataset=self.eval_dataset_for_sketch_reader
-            if module_name == "sketch"
-            else self.eval_dataset_for_intensive_reader,
-            eval_examples=self.eval_examples,
-        )
-        print(metrics)
-        max_eval_samples = (
-            self.data_args.max_eval_samples
-            if self.data_args.max_eval_samples is not None
-            else len(self.eval_examples)
-        )
-        metrics["eval_samples"] = min(max_eval_samples, len(self.eval_examples))
-
-        reader.log_metrics("eval", metrics)
-        reader.save_metrics("eval", metrics)

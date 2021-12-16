@@ -6,25 +6,27 @@ class DataProcessor:
     def __init__(
         self,
         data_args,
-        training_args,
-        tokenizer,
+        sketch_tokenizer,
+        intensive_tokenizer,
         column_names,
     ):
         self.data_args = data_args
-        self.training_args = training_args
 
-        self.tokenizer = tokenizer
+        self.sketch_tokenizer = sketch_tokenizer
+        self.intensive_tokenizer = intensive_tokenizer
         self.question_column_name = "question" if "question" in column_names else column_names[0]
         self.context_column_name = "context" if "context" in column_names else column_names[1]
         self.answer_column_name = "answers" if "answers" in column_names else column_names[2]
-        self.max_seq_length = min(self.data_args.max_seq_length, self.tokenizer.model_max_length)
+        # self.max_seq_length = min(self.data_args.max_seq_length, self.tokenizer.model_max_length)
+        self.max_seq_length = self.data_args.max_seq_length
 
-        self.pad_on_right = self.tokenizer.padding_side == "right"
+        # self.pad_on_right = self.tokenizer.padding_side == "right"
+        self.pad_on_right = True
 
     def prepare_train_features_for_sketch_reader(self, examples):
         examples[self.question_column_name] = [q.lstrip() for q in examples[self.question_column_name]]
 
-        tokenized_examples = self.tokenizer(
+        tokenized_examples = self.sketch_tokenizer(
             examples[self.question_column_name if self.pad_on_right else self.context_column_name],
             examples[self.context_column_name if self.pad_on_right else self.question_column_name],
             truncation="only_second" if self.pad_on_right else "only_first",
@@ -51,7 +53,7 @@ class DataProcessor:
     def prepare_eval_features_for_sketch_reader(self, examples):
         examples[self.question_column_name] = [q.lstrip() for q in examples[self.question_column_name]]
 
-        tokenized_examples = self.tokenizer(
+        tokenized_examples = self.sketch_tokenizer(
             examples[self.question_column_name if self.pad_on_right else self.context_column_name],
             examples[self.context_column_name if self.pad_on_right else self.question_column_name],
             truncation="only_second" if self.pad_on_right else "only_first",
@@ -79,37 +81,10 @@ class DataProcessor:
 
         return tokenized_examples
 
-    def prepare_test_features_for_sketch_reader(self, examples):
-        examples[self.question_column_name] = [q.lstrip() for q in examples[self.question_column_name]]
-
-        tokenized_examples = self.tokenizer(
-            examples[self.question_column_name if self.pad_on_right else self.context_column_name],
-            examples[self.context_column_name if self.pad_on_right else self.question_column_name],
-            truncation="only_second" if self.pad_on_right else "only_first",
-            max_length=self.max_seq_length,
-            stride=self.data_args.doc_stride,
-            return_overflowing_tokens=True,
-            return_offsets_mapping=False,
-            padding="max_length" if self.data_args.pad_to_max_length else False,
-        )
-
-        tokenized_examples["labels"] = []
-        tokenized_examples["example_id"] = []
-
-        sample_mapping = tokenized_examples.pop("overflow_to_sample_mapping")
-
-        for i in range(len(tokenized_examples["input_ids"])):
-            sample_index = sample_mapping[i]
-
-            id_col = examples["guid"][sample_index]
-            tokenized_examples["example_id"].append(id_col)
-
-        return tokenized_examples
-
     def prepare_train_features_for_intensive_reader(self, examples):
         examples[self.question_column_name] = [q.lstrip() for q in examples[self.question_column_name]]
 
-        tokenized_examples = self.tokenizer(
+        tokenized_examples = self.intensive_tokenizer(
             examples[self.question_column_name if self.pad_on_right else self.context_column_name],
             examples[self.context_column_name if self.pad_on_right else self.question_column_name],
             truncation="only_second" if self.pad_on_right else "only_first",
@@ -130,7 +105,7 @@ class DataProcessor:
 
         for i, offsets in enumerate(offset_mapping):
             input_ids = tokenized_examples["input_ids"][i]
-            cls_index = input_ids.index(self.tokenizer.cls_token_id)
+            cls_index = input_ids.index(self.intensive_tokenizer.cls_token_id)
             tokenized_examples["cls_idx"].append(cls_index)
 
             sequence_ids = tokenized_examples.sequence_ids(i)
@@ -186,7 +161,7 @@ class DataProcessor:
     def prepare_eval_features_for_intensive_reader(self, examples):
         examples[self.question_column_name] = [q.lstrip() for q in examples[self.question_column_name]]
 
-        tokenized_examples = self.tokenizer(
+        tokenized_examples = self.intensive_tokenizer(
             examples[self.question_column_name if self.pad_on_right else self.context_column_name],
             examples[self.context_column_name if self.pad_on_right else self.question_column_name],
             truncation="only_second" if self.pad_on_right else "only_first",
@@ -219,30 +194,3 @@ class DataProcessor:
             ]
 
         return tokenized_examples
-
-    def post_processing_function(self, examples, features, predictions, stage="eval"):
-        # Post-processing: we match the start logits and end logits to answers in the original context.
-        log_level = self.training_args.get_process_log_level()
-
-        predictions = postprocess_qa_predictions(
-            examples=examples,
-            features=features,
-            predictions=predictions,
-            version_2_with_negative=self.data_args.version_2_with_negative,
-            n_best_size=self.data_args.n_best_size,
-            max_answer_length=self.data_args.max_answer_length,
-            null_score_diff_threshold=self.data_args.null_score_diff_threshold,
-            output_dir=self.training_args.output_dir,
-            log_level=log_level,
-            prefix=stage,
-        )
-        # Format the result to the format the metric expects.
-        if self.data_args.version_2_with_negative:
-            formatted_predictions = [
-                {"id": k, "prediction_text": v, "no_answer_probability": 0.0} for k, v in predictions.items()
-            ]
-        else:
-            formatted_predictions = [{"id": k, "prediction_text": v} for k, v in predictions.items()]
-
-        references = [{"id": ex["guid"], "answers": ex[self.answer_column_name]} for ex in examples]
-        return EvalPrediction(predictions=formatted_predictions, label_ids=references)

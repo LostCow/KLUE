@@ -1,0 +1,21 @@
+python run_retro_reader_qa.py \
+    --sketch_model_name_or_path "monologg/koelectra-base-v3-discriminator" \
+    --intensive_model_name_or_path "monologg/koelectra-base-v3-discriminator" \
+    --do_train \
+    --do_eval \
+    --evaluation_strategy epoch \
+    --logging_strategy epoch \
+    --save_strategy epoch \
+    --dataset_name "klue" \
+    --dataset_path 'klue-mrc-v1.1' \
+    --train_file 'klue-mrc-v1.1_train.json' \
+    --validation_file 'klue-mrc-v1.1_dev.json' \
+    --save_total_limit 2 \
+    --output_dir outputs \
+    --version_2_with_negative True \
+    --num_train_epochs 10 \
+    --logging_steps 100 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 4 \
+    --load_best_model_at_end True

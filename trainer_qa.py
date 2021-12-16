@@ -17,8 +17,11 @@ A subclass of `Trainer` specific to Question-Answering tasks
 """
 
 from transformers import Trainer, is_torch_tpu_available
-from transformers.trainer_utils import PredictionOutput
+from transformers.trainer_utils import PredictionOutput, speed_metrics, denumpify_detensorize
+from transformers.debug_utils import DebugOption
 
+import math
+import time
 
 if is_torch_tpu_available():
     import torch_xla.core.xla_model as xm
@@ -48,8 +51,7 @@ class QuestionAnsweringTrainer(Trainer):
                 description="Evaluation",
                 # No point gathering the predictions if there are no metrics, otherwise we defer to
                 # self.args.prediction_loss_only
-                # prediction_loss_only=True if compute_metrics is None else None,
-                prediction_loss_only=False,
+                prediction_loss_only=True if compute_metrics is None else None,
                 ignore_keys=ignore_keys,
             )
         finally:
@@ -57,6 +59,7 @@ class QuestionAnsweringTrainer(Trainer):
 
         if self.post_process_function is not None and self.compute_metrics is not None:
             eval_preds = self.post_process_function(eval_examples, eval_dataset, output.predictions)
+            # eval_preds = self.post_process_function(eval_examples, eval_dataset, output)
             metrics = self.compute_metrics(eval_preds)
 
             # Prefix all keys with metric_key_prefix + '_'

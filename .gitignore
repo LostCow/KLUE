@@ -127,3 +127,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# klue mrc dataset
+klue-mrc-v1.1/
+
+# retroreader outputs
+retro_reader/sketch_reader_outputs/
+retro_reader/intensive_reader_outputs/
+retro_reader/outputs/

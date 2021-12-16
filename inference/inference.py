@@ -86,9 +86,11 @@ def get_score1():
         if output_scores[qid] > best_th:
             output_predictions[qid] = ""
 
-    output_prediction_file = KLUE_MRC_OUTPUT
+    output_prediction_file = os.path.join(os.environ.get("SM_OUTPUT_DATA_DIR", "/output"), KLUE_MRC_OUTPUT)
     with open(output_prediction_file, "w") as writer:
         writer.write(json.dumps(output_predictions, indent=4) + "\n")
+
+    return output_predictions
 
 
 def load_model_and_type(model_dir: str):
@@ -148,7 +150,7 @@ def inference() -> None:
         eval_examples=trainer.eval_examples,
     )
 
-    get_score1()
+    return get_score1()
 
 
 if __name__ == "__main__":
