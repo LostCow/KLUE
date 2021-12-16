@@ -37,12 +37,44 @@ import os
 import json
 
 from copy import copy
+import torch
+import gc
 
 
 class SketchReader(Trainer):
     def __init__(self, *args, eval_examples=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.eval_examples = eval_examples
+
+    def free_memory(self):
+        self.model.to("cpu")
+        self._optimizer_to("cpu")
+        self._scheduler_to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def _optimizer_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.optimizer.state.values():
+            # Not sure there are any global tensors in the state dict
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
+            elif isinstance(param, dict):
+                for subparam in param.values():
+                    if isinstance(subparam, torch.Tensor):
+                        subparam.data = subparam.data.to(device)
+                        if subparam._grad is not None:
+                            subparam._grad.data = subparam._grad.data.to(device)
+
+    def _scheduler_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.lr_scheduler.__dict__.values():
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
 
     def post_process_function(
         self,
@@ -138,6 +170,36 @@ class IntensiveReader(Trainer):
         super().__init__(*args, **kwargs)
         self.eval_examples = eval_examples
         self.data_args = data_args
+
+    def free_memory(self):
+        self.model.to("cpu")
+        self._optimizer_to("cpu")
+        self._scheduler_to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def _optimizer_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.optimizer.state.values():
+            # Not sure there are any global tensors in the state dict
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
+            elif isinstance(param, dict):
+                for subparam in param.values():
+                    if isinstance(subparam, torch.Tensor):
+                        subparam.data = subparam.data.to(device)
+                        if subparam._grad is not None:
+                            subparam._grad.data = subparam._grad.data.to(device)
+
+    def _scheduler_to(self, device: str = "cpu"):
+        # https://github.com/pytorch/pytorch/issues/8741
+        for param in self.lr_scheduler.__dict__.values():
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to(device)
+                if param._grad is not None:
+                    param._grad.data = param._grad.data.to(device)
 
     def post_process_function(
         self,
@@ -534,7 +596,14 @@ class RetroReader:
 
     def train(self):
         self.sketch_reader.train()
+        self.sketch_reader.free_memory()
+        self.sketch_reader.save_model()
+        self.sketch_reader.save_state()
+
         self.intensive_reader.train()
+        self.intensive_reader.free_memory()
+        self.intensive_reader.save_model()
+        self.intensive_reader.save_state()
 
     def preprocess_examples(self, module_name="sketch"):
         with self.base_training_args.main_process_first(
