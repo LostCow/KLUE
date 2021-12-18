@@ -1,6 +1,0 @@
-# Framework
-torch==1.7.0
-transformers==3.5.1
-
-# Utils
-dataclasses; python_version<"3.7"
