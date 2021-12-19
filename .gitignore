@@ -132,3 +132,4 @@ outputs/
 wandb/
 nohup.out
 data/
+model/
