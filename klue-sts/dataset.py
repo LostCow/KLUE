@@ -225,7 +225,7 @@ def convert_examples_to_features_with_sen_embed(
             for example in examples
         ],
         max_length=max_length,
-        padding="max_length",
+        padding=True,
         truncation=True,
     )
     tatal_s1_mask = []

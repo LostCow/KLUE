@@ -9,8 +9,11 @@ import os
 import tarfile
 
 import torch
-from dataloader import KlueStsDataLoaderFetcher
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
+from torch.utils.data import DataLoader
+from dataset import KlueStsWithSentenceMaskDataset
+from transformers import AutoTokenizer, AutoConfig
+from utils import read_json
+from model import RobertaForStsRegression
 
 
 def load_model_and_type(model_dir, model_tar_file):
@@ -23,7 +26,7 @@ def load_model_and_type(model_dir, model_tar_file):
     tarpath = os.path.join(model_dir, model_tar_file)
     tar = tarfile.open(tarpath, "r:gz")
     tar.extractall(path=model_dir)
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+    model = RobertaForStsRegression.from_pretrained(model_dir)
     config = AutoConfig.from_pretrained(model_dir)
     return model, config.model_type
 
@@ -45,28 +48,19 @@ def inference(data_dir, model_dir, output_dir, args) -> None:
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
 
     # get test_data_loader
-    klue_sts_dataloader_fetcher = KlueStsDataLoaderFetcher(tokenizer, args.max_length)
-    kwargs = (
-        {"num_workers": num_gpus, "pin_memory": True}
-        if torch.cuda.is_available()
-        else {}
-    )
-    klue_sts_test_loader = klue_sts_dataloader_fetcher.get_dataloader(
-        file_path=os.path.join(data_dir, args.test_filename),
-        batch_size=args.batch_size,
-        **kwargs,
-    )
+    test_file_path = os.path.join(args.data_dir, args.test_filename)
+    test_json = read_json(test_file_path)
+    test_dataset = KlueStsWithSentenceMaskDataset(test_json, tokenizer, 510)
+    data_loader = DataLoader(test_dataset, args.batch_size, drop_last=False)
 
     # infer
     output_file = open(os.path.join(output_dir, args.output_filename), "w")
-    for out in klue_sts_test_loader:
-        input_ids, attention_mask, token_type_ids, labels = [o.to(device) for o in out]
-        if model_type == 'roberta':
-            output = model(input_ids, attention_mask=attention_mask)[0]
-        else:
-            output = model(
-                input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask
-            )[0]
+    for batch in data_loader:
+        input_data = {
+            key: value.to(device) for key, value in batch.items() if not key == "labels"
+        }
+
+        output = model(**input_data)[0]
 
         preds = output.detach().cpu().numpy()
 
@@ -90,9 +84,7 @@ def main():
     parser.add_argument(
         "--data_dir", type=str, default=os.environ.get("SM_CHANNEL_EVAL", "/data")
     )
-    parser.add_argument(
-        "--model_dir", type=str, default="./model"
-    )
+    parser.add_argument("--model_dir", type=str, default="./model")
     parser.add_argument(
         "--model_tar_file",
         type=str,
@@ -102,7 +94,9 @@ def main():
              transformers.XLMRobertaTokenizer or transformers.BertTokenizer as a tokenizer",
     )
     parser.add_argument(
-        "--output_dir", type=str, default=os.environ.get("SM_OUTPUT_DATA_DIR", "/output")
+        "--output_dir",
+        type=str,
+        default=os.environ.get("SM_OUTPUT_DATA_DIR", "/output"),
     )
     parser.add_argument(
         "--max_length",
