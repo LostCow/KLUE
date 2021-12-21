@@ -128,9 +128,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# klue mrc dataset
+# klue dataset
 klue-mrc-v1.1/
 
-# retroreader outputs
-outputs/
-inference/model/
+# model outputs
+mrc/outputs/
+mrc/inference/model/
