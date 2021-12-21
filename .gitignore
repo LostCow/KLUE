@@ -133,3 +133,4 @@ wandb/
 nohup.out
 data/
 model/
+hp_search/
