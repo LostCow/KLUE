@@ -127,3 +127,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# klue dataset
+klue-mrc-v1.1/
+
+# model outputs
+mrc/outputs/
+mrc/inference/model/
