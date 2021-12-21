@@ -11,6 +11,7 @@ from transformers import (
     default_data_collator,
     DataCollatorWithPadding,
     AutoModelForSequenceClassification,
+    AutoModelForQuestionAnswering,
 )
 from transformers.trainer_utils import (
     EvalLoopOutput,
@@ -27,6 +28,7 @@ from processor import DataProcessor
 from model import (
     RobertaForSequenceClassification,
     RobertaForQuestionAnsweringAVPool,
+    RobertaCNNForQuestionAnsweringAVPool,
     ElectraForQuestionAnsweringAVPool,
 )
 
@@ -669,7 +671,6 @@ class RetroReader:
                 return metric
 
             sketch_reader_args = copy(self.base_training_args)
-            sketch_reader_args.metric_for_best_model = "eval_f1"
             sketch_reader_args.output_dir = "sketch_reader_outputs"
             self.sketch_reader = SketchReader(
                 model=sketch_reader_model,
@@ -689,7 +690,8 @@ class RetroReader:
                     self.intensive_model_name_or_path, config=intensive_reader_config
                 )
             else:
-                intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
+                # intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
+                intensive_reader_model = RobertaCNNForQuestionAnsweringAVPool.from_pretrained(
                     self.intensive_model_name_or_path, config=intensive_reader_config
                 )
             (
@@ -702,7 +704,6 @@ class RetroReader:
                 return metric.compute(predictions=p.predictions, references=p.label_ids)
 
             intensive_reader_args = copy(self.base_training_args)
-            intensive_reader_args.metric_for_best_model = "eval_exact"
             intensive_reader_args.output_dir = "intensive_reader_outputs"
             self.intensive_reader = IntensiveReader(
                 model=intensive_reader_model,

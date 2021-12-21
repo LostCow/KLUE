@@ -16,7 +16,11 @@ from datasets.load import load_metric
 from datasets import Dataset
 
 from processor import DataProcessor
-from model import RobertaForSequenceClassification, RobertaForQuestionAnsweringAVPool
+from model import (
+    RobertaForSequenceClassification,
+    RobertaForQuestionAnsweringAVPool,
+    RobertaCNNForQuestionAnsweringAVPool,
+)
 
 import collections
 import time
@@ -586,7 +590,8 @@ class RetroReader:
 
         elif module_name == "intensive":
             intensive_reader_config = AutoConfig.from_pretrained(self.intensive_model_name_or_path)
-            intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
+            # intensive_reader_model = RobertaForQuestionAnsweringAVPool.from_pretrained(
+            intensive_reader_model = RobertaCNNForQuestionAnsweringAVPool.from_pretrained(
                 self.intensive_model_name_or_path, config=intensive_reader_config
             )
             (

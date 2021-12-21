@@ -133,3 +133,4 @@ klue-mrc-v1.1/
 
 # retroreader outputs
 outputs/
+inference/model/

@@ -1,4 +1,4 @@
-python run_retro_reader_qa.py \
+python hp_search.py \
     --sketch_model_name_or_path "klue/roberta-large" \
     --intensive_model_name_or_path "klue/roberta-large" \
     --do_train \
@@ -10,7 +10,7 @@ python run_retro_reader_qa.py \
     --dataset_path 'klue-mrc-v1.1' \
     --train_file 'klue-mrc-v1.1_train.json' \
     --validation_file 'klue-mrc-v1.1_dev.json' \
-    --save_total_limit 2 \
+    --save_total_limit 1 \
     --output_dir outputs \
     --version_2_with_negative True \
     --num_train_epochs 5 \
@@ -19,5 +19,5 @@ python run_retro_reader_qa.py \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 16 \
     --metric_for_best_model eval_f1 \
-    --load_best_model_at_end True \
-    --fp16
+    --fp16 \
+    --load_best_model_at_end True

@@ -80,7 +80,7 @@ def get_score1():
         best_text = sorted_texts[0]
         output_predictions[key] = best_text
 
-    best_th = 0
+    best_th = 0.5
 
     for qid in output_predictions.keys():
         if output_scores[qid] > best_th:
