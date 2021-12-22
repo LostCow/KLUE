@@ -1,4 +1,4 @@
-# KLUE MRC
+# KLUE NLI
 
 ## Train
 
