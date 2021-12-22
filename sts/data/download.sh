@@ -1,0 +1,1 @@
+wget https://aistages-prod-server-public.s3.amazonaws.com/app/Competitions/000067/data/klue-sts-v1.1.tar.gz
