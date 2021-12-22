@@ -128,18 +128,21 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-<<<<<<< HEAD
-outputs/
-wandb/
-nohup.out
-data/
-model/
-hp_search/
-=======
 # klue dataset
 klue-mrc-v1.1/
+klue-nli-v1.1/
+klue-re-v1.1/
+klue-sts-v1.1/
+klue-tc-v1.1/
 
 # model outputs
 mrc/outputs/
 mrc/inference/model/
->>>>>>> main
+re/outputs/
+re/inference/model/
+nli/outputs/
+nli/inference/model/
+sts/outputs/
+sts/inference/model/
+tc/outputs/
+tc/inference/model/
