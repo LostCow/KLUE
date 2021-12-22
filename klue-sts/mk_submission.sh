@@ -1,0 +1,1 @@
+tar -czvf klue-sts.tar.gz dataset.py inference.py model.py model requirements.txt utils.py
