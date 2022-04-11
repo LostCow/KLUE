@@ -168,7 +168,7 @@ class SkeletonAwareBERT(BertPreTrainedModel):
         )
 
         sequence_output = outputs[0]
-        pooled_output = outputs[1]
+        pooled_output = sequence_output[:, 0, :]
         # print(sequence_output)
         # print(pooled_output)
         # print(sequence_output)
